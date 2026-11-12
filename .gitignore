@@ -1,0 +1,24 @@
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+
+# Videos y archivos generados
+salida/
+guardados/
+*.mp4
+*.wav
+*.mp3
+
+# Configuraciones locales
+.env
+.streamlit/secrets.toml
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
