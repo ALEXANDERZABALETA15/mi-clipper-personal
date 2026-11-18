@@ -280,8 +280,11 @@ def mostrar_clip(clip):
                     )
                     contenido_srt = subtitulos.crear_srt(segmentos_sub, 0, clip["duracion"])
                     clip["srt"] = contenido_srt
+                    video_base_subtitulos = (
+                        clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+                    )
                     clip["datos_subtitulos"] = subtitulos.aplicar_subtitulos(
-                        clip["datos"], contenido_srt,
+                        video_base_subtitulos, contenido_srt,
                         formato=clip.get("formato", "9:16"),
                         tamano=tamano_sub, posicion=posicion_sub,
                         color=color_sub, fondo=fondo_sub, negrita=negrita_sub,
