@@ -3,6 +3,8 @@ import io                      # para leer imágenes desde la memoria
 import os                      # para leer la clave guardada en tu computador
 import subprocess              # para reconocer los errores de FFmpeg
 import time                    # para medir cuánto tarda cada etapa
+import tempfile
+import zipfile
 from datetime import datetime  # para ponerle fecha y hora al nombre del clip guardado
 from PIL import Image          # para saber el tamaño real del clip
 import streamlit as st         # crea la página web
@@ -12,6 +14,7 @@ import inteligencia            # la IA que elige los mejores momentos
 import titulos                 # el código de los títulos (titulos.py)
 import locutor                 # las voces narradoras (locutor.py)
 import subtitulos               # editor local de subtítulos
+import editor_vertical           # editor local de composición vertical
 
 # ---------- CONFIGURACIÓN DE LA PÁGINA ----------
 st.set_page_config(page_title="Mi Clipper", layout="wide")
@@ -24,6 +27,8 @@ if "tiempos" not in st.session_state:
     st.session_state.tiempos = {}  # cuánto tardó cada etapa
 if "aviso" not in st.session_state:
     st.session_state.aviso = ""    # mensaje si la IA no se pudo usar
+if "editor_folder" not in st.session_state:
+    st.session_state.editor_folder = tempfile.mkdtemp(prefix="mi_clipper_editor_")
 
 # ---------- BARRA LATERAL CON LOS CONTROLES ----------
 with st.sidebar:
@@ -150,7 +155,14 @@ if generar and (link or archivo):
             t = time.perf_counter()
             nuevos = []
             for i, c in enumerate(seleccion, start=1):
-                ruta = clipper.cortar(video, c["inicio"], c["fin"], i, formato, altura)   # corta cada clip
+                ruta = clipper.cortar(video, c["inicio"], c["fin"], i, formato, altura)
+                fuente_editor = None
+                if formato == "9:16":
+                    nombre_fuente = "fuente_" + str(i) + "_" + str(int(c["inicio"])) + ".mp4"
+                    fuente_editor = str(editor_vertical.crear_clip_fuente(
+                        video, c["inicio"], c["fin"],
+                        os.path.join(st.session_state.editor_folder, nombre_fuente)
+                    ))
                 nuevos.append({
                     "id": f"{i}_{int(c['inicio'])}",              # identificador único del clip
                     "inicio": c["inicio"],                        # segundo donde empieza
@@ -171,6 +183,10 @@ if generar and (link or archivo):
                     "datos_subtitulos": None,
                     "srt": None,
                     "formato": formato,
+                    "editor_fuente": fuente_editor,
+                    "datos_editor": None,
+                    "config_editor": None,
+                    "incluir_zip": True,
                 })
             if usa_ia_ahora:                                      # los mejores primero
                 nuevos.sort(key=lambda c: -(c["puntaje"] or 0))
@@ -221,7 +237,7 @@ def mostrar_clip(clip):
                         st.markdown(f"- {punto}")
 
     # Lo que se ve: con voz nueva > con título > el clip original
-    mostrado = clip.get("datos_subtitulos") or clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+    mostrado = clip.get("datos_subtitulos") or clip["datos_voz"] or clip["datos_titulo"] or clip.get("datos_editor") or clip["datos"]
     st.video(mostrado)                                            # reproductor del clip
 
     col1, col2 = st.columns(2)                                    # Guardar y Descartar juntos
@@ -254,7 +270,7 @@ def mostrar_clip(clip):
             else:
                 with st.spinner("Pegando el título..."):
                     clip["datos_titulo"] = titulos.aplicar_al_video(
-                        clip["datos"], banner, foto.width, foto.height, lugar)
+                        clip.get("datos_editor") or clip["datos"], banner, foto.width, foto.height, lugar)
                     clip["datos_subtitulos"] = None
                     clip["datos_voz"] = None                      # la voz hay que volver a aplicarla
                 st.rerun()                                        # refresca para ver el resultado
@@ -262,6 +278,57 @@ def mostrar_clip(clip):
             clip["datos_titulo"] = None                           # vuelve al clip limpio
             clip["datos_voz"] = None
             st.rerun()
+
+
+    if clip.get("editor_fuente") and clip.get("formato") == "9:16":
+        with st.expander("Editor vertical: gameplay + cámara", expanded=False):
+            st.caption("Selecciona las áreas en el video original. La webcam se superpone al gameplay en un Short 9:16.")
+            ancho_fuente, alto_fuente = editor_vertical.obtener_dimensiones(clip["editor_fuente"])
+            st.caption(f"Video original conservado: {ancho_fuente} × {alto_fuente}. Los recortes se ajustan en porcentajes.")
+            anterior = clip.get("config_editor") or {}
+            gd = anterior.get("gameplay", {"x": 0, "y": 0, "ancho": 100, "alto": 100})
+            st.markdown("**Gameplay (marco rojo)**")
+            a, b = st.columns(2)
+            gx = a.slider("Gameplay: izquierda (%)", 0, 95, int(gd["x"]), key=f"egx_{cid}")
+            gy = b.slider("Gameplay: arriba (%)", 0, 95, int(gd["y"]), key=f"egy_{cid}")
+            gw = st.slider("Gameplay: ancho (%)", 5, 100-gx, min(int(gd["ancho"]), 100-gx), key=f"egw_{cid}")
+            gh = st.slider("Gameplay: alto (%)", 5, 100-gy, min(int(gd["alto"]), 100-gy), key=f"egh_{cid}")
+            cd = anterior.get("camara", {"x": 70, "y": 5, "ancho": 25, "alto": 30})
+            st.markdown("**Cámara del streamer (marco verde)**")
+            a, b = st.columns(2)
+            cx = a.slider("Cámara: izquierda (%)", 0, 95, min(int(cd["x"]),95), key=f"ecx_{cid}")
+            cy = b.slider("Cámara: arriba (%)", 0, 95, min(int(cd["y"]),95), key=f"ecy_{cid}")
+            cw = st.slider("Cámara: ancho (%)", 5, 100-cx, min(int(cd["ancho"]),100-cx), key=f"ecw_{cid}")
+            ch = st.slider("Cámara: alto (%)", 5, 100-cy, min(int(cd["alto"]),100-cy), key=f"ech_{cid}")
+            a, b, c = st.columns(3)
+            pos = a.selectbox("Posición webcam", ["Superior","Inferior"], index=0 if anterior.get("camara_posicion","Superior")=="Superior" else 1, key=f"epos_{cid}")
+            ali = b.selectbox("Alineación", ["Izquierda","Centro","Derecha"], index=["Izquierda","Centro","Derecha"].index(anterior.get("camara_alineacion","Derecha")), key=f"eali_{cid}")
+            tam = c.slider("Tamaño webcam (%)", 25, 65, int(anterior.get("camara_ancho",45)), key=f"esize_{cid}")
+            config = {"gameplay":{"x":gx,"y":gy,"ancho":gw,"alto":gh},"camara":{"x":cx,"y":cy,"ancho":cw,"alto":ch},"camara_posicion":pos,"camara_alineacion":ali,"camara_ancho":tam}
+            try:
+                marcada, previa = editor_vertical.crear_previsualizaciones(clip["editor_fuente"], config)
+                a, b = st.columns(2)
+                a.image(marcada, caption="Rojo: gameplay · Verde: webcam", use_container_width=True)
+                b.image(previa, caption="Vista previa 9:16", use_container_width=True)
+            except editor_vertical.ErrorEditorVertical as error:
+                st.error(str(error))
+            if st.button("Generar clip vertical con cámara", type="primary", key=f"erender_{cid}"):
+                try:
+                    with st.spinner("Componiendo gameplay y webcam..."):
+                        clip["datos_editor"] = editor_vertical.aplicar_composicion(clip["editor_fuente"], config, 720)
+                        clip["config_editor"] = config
+                        clip["datos_subtitulos"] = None
+                        clip["datos_voz"] = None
+                    st.success("Composición vertical creada.")
+                    st.rerun()
+                except editor_vertical.ErrorEditorVertical as error:
+                    st.error(str(error))
+            if clip.get("datos_editor"):
+                st.video(clip["datos_editor"])
+                st.download_button("Descargar composición 9:16", clip["datos_editor"], file_name=f"clip_vertical_{cid}.mp4", mime="video/mp4", key=f"edl_{cid}")
+                if st.button("Quitar composición", key=f"eremove_{cid}"):
+                    clip["datos_editor"] = None
+                    st.rerun()
 
     with st.expander("Subtítulos automáticos", expanded=False):
         st.caption("Generados localmente con Faster-Whisper y FFmpeg. Sin APIs de pago.")
@@ -281,7 +348,7 @@ def mostrar_clip(clip):
                     contenido_srt = subtitulos.crear_srt(segmentos_sub, 0, clip["duracion"])
                     clip["srt"] = contenido_srt
                     video_base_subtitulos = (
-                        clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+                        clip["datos_voz"] or clip["datos_titulo"] or clip.get("datos_editor") or clip["datos"]
                     )
                     clip["datos_subtitulos"] = subtitulos.aplicar_subtitulos(
                         video_base_subtitulos, contenido_srt,
@@ -313,7 +380,7 @@ def mostrar_clip(clip):
         if st.button("Aplicar voz", key=f"av_{cid}"):
             try:
                 with st.spinner("Generando la voz..."):
-                    base = clip["datos_titulo"] or clip["datos"]  # sobre el clip (con título si lo tiene)
+                    base = clip["datos_titulo"] or clip.get("datos_editor") or clip["datos"]  # conserva la composición vertical
                     audio_voz = locutor.generar_audio(texto_voz, codigo_voz, velocidad, tono)
                     clip["datos_voz"], clip["aviso_voz"] = locutor.poner_voz(base, audio_voz, fondo)
                     clip["datos_subtitulos"] = None
@@ -334,8 +401,26 @@ def mostrar_clip(clip):
 
 # ---------- ACOMODAR LOS CLIPS EN CUADRÍCULA ----------
 clips = st.session_state.clips
-for i in range(0, len(clips), por_fila):                          # una vuelta por cada fila
-    columnas = st.columns(por_fila)                               # crea las columnas de la fila
-    for columna, clip in zip(columnas, clips[i:i + por_fila]):    # un clip en cada columna
+for i in range(0, len(clips), por_fila):
+    columnas = st.columns(por_fila)
+    for columna, clip in zip(columnas, clips[i:i + por_fila]):
         with columna:
             mostrar_clip(clip)
+
+if clips:
+    st.divider()
+    st.subheader("Exportación de varios clips")
+    st.caption("Marca los clips que quieres reunir en un único ZIP.")
+    for clip in clips:
+        clip["incluir_zip"] = st.checkbox(f"Incluir clip {clip['id']}", value=clip.get("incluir_zip", True), key=f"zip_{clip['id']}")
+    if st.button("Preparar descarga de clips seleccionados", type="primary"):
+        elegidos = [clip for clip in clips if clip.get("incluir_zip")]
+        if not elegidos:
+            st.warning("Selecciona al menos un clip.")
+        else:
+            paquete = io.BytesIO()
+            with zipfile.ZipFile(paquete, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
+                for clip in elegidos:
+                    contenido = clip.get("datos_subtitulos") or clip.get("datos_editor") or clip.get("datos_voz") or clip.get("datos_titulo") or clip["datos"]
+                    archivo_zip.writestr(f"clip_{clip['id']}.mp4", contenido)
+            st.download_button(f"Descargar {len(elegidos)} clips en ZIP", data=paquete.getvalue(), file_name=f"mi_clipper_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip", mime="application/zip", key="descargar_zip_clips")

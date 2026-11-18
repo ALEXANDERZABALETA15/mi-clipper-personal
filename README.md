@@ -11,6 +11,8 @@ Aplicación personal en Python y Streamlit para descargar o cargar videos, trans
 - Modo rápido basado en análisis de volumen.
 - Recorte horizontal 16:9 y vertical 9:16.
 - Títulos, ganchos y voz narradora.
+- Editor vertical 9:16 para conservar el gameplay y superponer la cámara del streamer con recortes y posición ajustables.
+- Exportación de varios clips seleccionados en un único archivo ZIP.
 - Reproducción, guardado y descarte de clips.
 
 ## Duraciones
@@ -56,3 +58,9 @@ streamlit run app.py
 ## Estado
 
 Proyecto personal en desarrollo.
+
+## Editor vertical para streamers
+
+Al generar clips en formato 9:16, Mi Clipper conserva temporalmente el fragmento original completo para abrir el editor vertical. En cada clip puedes ajustar en porcentajes el recorte del gameplay y el recorte de la webcam, elegir si la cámara aparece arriba o abajo, alinear a izquierda/centro/derecha y cambiar su tamaño. La vista previa muestra las dos áreas y el resultado vertical. La composición se renderiza localmente con FFmpeg, sin APIs ni servicios externos.
+
+La exportación múltiple permite marcar varios clips y reunir sus versiones finales en un ZIP.
