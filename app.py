@@ -160,6 +160,8 @@ if generar and (link or archivo):
                     "motivo": c.get("motivo", ""),                # por qué lo eligió
                     "titulo": c.get("titulo") or clipper.titulo_provisional(c["texto"]),
                     "gancho": c.get("gancho", ""),                # frase gancho sugerida
+                    "resumen": c.get("resumen", ""),
+                    "puntos_clave": c.get("puntos_clave", []),
                     "datos": ruta.read_bytes(),                   # el video queda en memoria
                     "miniatura": clipper.sacar_miniatura(ruta, i),      # un frame para la vista previa
                     "datos_titulo": None,                         # video con título (si lo aplicas)
