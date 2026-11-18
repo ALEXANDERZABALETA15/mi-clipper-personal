@@ -237,7 +237,7 @@ def mostrar_clip(clip):
                         st.markdown(f"- {punto}")
 
     # Lo que se ve: con voz nueva > con título > el clip original
-    mostrado = clip.get("datos_subtitulos") or clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+    mostrado = clip.get("datos_subtitulos") or clip["datos_voz"] or clip["datos_titulo"] or clip.get("datos_editor") or clip["datos"]
     st.video(mostrado)                                            # reproductor del clip
 
     col1, col2 = st.columns(2)                                    # Guardar y Descartar juntos
@@ -270,7 +270,7 @@ def mostrar_clip(clip):
             else:
                 with st.spinner("Pegando el título..."):
                     clip["datos_titulo"] = titulos.aplicar_al_video(
-                        clip["datos"], banner, foto.width, foto.height, lugar)
+                        clip.get("datos_editor") or clip["datos"], banner, foto.width, foto.height, lugar)
                     clip["datos_subtitulos"] = None
                     clip["datos_voz"] = None                      # la voz hay que volver a aplicarla
                 st.rerun()                                        # refresca para ver el resultado
@@ -348,7 +348,7 @@ def mostrar_clip(clip):
                     contenido_srt = subtitulos.crear_srt(segmentos_sub, 0, clip["duracion"])
                     clip["srt"] = contenido_srt
                     video_base_subtitulos = (
-                        clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+                        clip["datos_voz"] or clip["datos_titulo"] or clip.get("datos_editor") or clip["datos"]
                     )
                     clip["datos_subtitulos"] = subtitulos.aplicar_subtitulos(
                         video_base_subtitulos, contenido_srt,
@@ -380,7 +380,7 @@ def mostrar_clip(clip):
         if st.button("Aplicar voz", key=f"av_{cid}"):
             try:
                 with st.spinner("Generando la voz..."):
-                    base = clip["datos_titulo"] or clip["datos"]  # sobre el clip (con título si lo tiene)
+                    base = clip["datos_titulo"] or clip.get("datos_editor") or clip["datos"]  # conserva la composición vertical
                     audio_voz = locutor.generar_audio(texto_voz, codigo_voz, velocidad, tono)
                     clip["datos_voz"], clip["aviso_voz"] = locutor.poner_voz(base, audio_voz, fondo)
                     clip["datos_subtitulos"] = None
