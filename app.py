@@ -11,6 +11,7 @@ import clipper                 # descarga, audio, transcripción y cortes
 import inteligencia            # la IA que elige los mejores momentos
 import titulos                 # el código de los títulos (titulos.py)
 import locutor                 # las voces narradoras (locutor.py)
+import subtitulos               # editor local de subtítulos
 
 # ---------- CONFIGURACIÓN DE LA PÁGINA ----------
 st.set_page_config(page_title="Mi Clipper", layout="wide")
@@ -167,6 +168,9 @@ if generar and (link or archivo):
                     "datos_titulo": None,                         # video con título (si lo aplicas)
                     "datos_voz": None,                            # video con voz nueva (si la aplicas)
                     "aviso_voz": "",                              # aviso al poner la voz
+                    "datos_subtitulos": None,
+                    "srt": None,
+                    "formato": formato,
                 })
             if usa_ia_ahora:                                      # los mejores primero
                 nuevos.sort(key=lambda c: -(c["puntaje"] or 0))
@@ -217,7 +221,7 @@ def mostrar_clip(clip):
                         st.markdown(f"- {punto}")
 
     # Lo que se ve: con voz nueva > con título > el clip original
-    mostrado = clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+    mostrado = clip.get("datos_subtitulos") or clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
     st.video(mostrado)                                            # reproductor del clip
 
     col1, col2 = st.columns(2)                                    # Guardar y Descartar juntos
@@ -251,12 +255,56 @@ def mostrar_clip(clip):
                 with st.spinner("Pegando el título..."):
                     clip["datos_titulo"] = titulos.aplicar_al_video(
                         clip["datos"], banner, foto.width, foto.height, lugar)
+                    clip["datos_subtitulos"] = None
                     clip["datos_voz"] = None                      # la voz hay que volver a aplicarla
                 st.rerun()                                        # refresca para ver el resultado
         if clip["datos_titulo"] and st.button("Quitar título", key=f"q_{cid}"):
             clip["datos_titulo"] = None                           # vuelve al clip limpio
             clip["datos_voz"] = None
             st.rerun()
+
+    with st.expander("Subtítulos automáticos", expanded=False):
+        st.caption("Generados localmente con Faster-Whisper y FFmpeg. Sin APIs de pago.")
+        col_s1, col_s2 = st.columns(2)
+        tamano_sub = col_s1.selectbox("Tamaño", list(subtitulos.TAMANOS), index=1, key=f"stam_{cid}")
+        color_sub = col_s2.selectbox("Color", list(subtitulos.COLORES), key=f"scol_{cid}")
+        posicion_sub = st.selectbox("Posición", list(subtitulos.POSICIONES), key=f"spos_{cid}")
+        fondo_sub = st.checkbox("Fondo oscuro para mejorar la lectura", value=True, key=f"sfondo_{cid}")
+        negrita_sub = st.checkbox("Texto en negrita", value=True, key=f"sbold_{cid}")
+
+        if st.button("Generar / actualizar subtítulos", type="primary", key=f"sg_{cid}"):
+            try:
+                with st.spinner("Transcribiendo el clip y aplicando subtítulos..."):
+                    segmentos_sub = subtitulos.transcribir_video(
+                        clip["datos"], "tiny" if precision.startswith("Rápida") else "base"
+                    )
+                    contenido_srt = subtitulos.crear_srt(segmentos_sub, 0, clip["duracion"])
+                    clip["srt"] = contenido_srt
+                    video_base_subtitulos = (
+                        clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
+                    )
+                    clip["datos_subtitulos"] = subtitulos.aplicar_subtitulos(
+                        video_base_subtitulos, contenido_srt,
+                        formato=clip.get("formato", "9:16"),
+                        tamano=tamano_sub, posicion=posicion_sub,
+                        color=color_sub, fondo=fondo_sub, negrita=negrita_sub,
+                    )
+                st.success("Subtítulos aplicados correctamente.")
+                st.rerun()
+            except subtitulos.ErrorSubtitulos as e:
+                st.error(str(e))
+
+        if clip.get("srt"):
+            st.download_button(
+                "Descargar subtítulos (.srt)",
+                data=clip["srt"].encode("utf-8-sig"),
+                file_name=f"subtitulos_{cid}.srt",
+                mime="application/x-subrip",
+                key=f"sd_{cid}",
+            )
+            if st.button("Quitar subtítulos del video", key=f"sq_{cid}"):
+                clip["datos_subtitulos"] = None
+                st.rerun()
 
     with st.expander("Voz narradora"):                            # cambia la voz del clip
         st.caption("Aplica primero el título y al final la voz.")
@@ -268,6 +316,7 @@ def mostrar_clip(clip):
                     base = clip["datos_titulo"] or clip["datos"]  # sobre el clip (con título si lo tiene)
                     audio_voz = locutor.generar_audio(texto_voz, codigo_voz, velocidad, tono)
                     clip["datos_voz"], clip["aviso_voz"] = locutor.poner_voz(base, audio_voz, fondo)
+                    clip["datos_subtitulos"] = None
                 st.rerun()
             except locutor.ErrorVoz as e:
                 st.error(str(e))
