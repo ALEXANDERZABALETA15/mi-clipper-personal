@@ -286,3 +286,38 @@ def aplicar_subtitulos(
 
     except OSError as error:
         raise ErrorSubtitulos(f"No pude preparar los archivos temporales: {error}") from error
+
+
+def transcribir_video(datos_video: bytes, modelo: str = "base") -> list[dict[str, Any]]:
+    """Transcribe un clip local para el modo rápido, sin depender de APIs."""
+    if not datos_video:
+        raise ErrorSubtitulos("El video está vacío.")
+    try:
+        import clipper
+        clipper.MODELO_WHISPER = modelo
+        whisper = clipper.obtener_modelo()
+        with tempfile.TemporaryDirectory(prefix="mi_clipper_audio_") as temporal:
+            carpeta = Path(temporal)
+            entrada = carpeta / "clip.mp4"
+            audio = carpeta / "audio.wav"
+            entrada.write_bytes(datos_video)
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-y", "-i", str(entrada),
+                 "-vn", "-ac", "1", "-ar", "16000", str(audio)],
+                check=True, capture_output=True, timeout=300,
+            )
+            partes, _ = whisper.transcribe(str(audio), vad_filter=True, beam_size=1)
+            return [
+                {"inicio": float(parte.start), "fin": float(parte.end),
+                 "texto": parte.text.strip()}
+                for parte in partes if parte.text and parte.text.strip()
+            ]
+    except ErrorSubtitulos:
+        raise
+    except subprocess.TimeoutExpired as error:
+        raise ErrorSubtitulos("La extracción de audio superó los 5 minutos.") from error
+    except subprocess.CalledProcessError as error:
+        detalle = (error.stderr or b"").decode(errors="replace")[-800:]
+        raise ErrorSubtitulos("FFmpeg no pudo extraer el audio: " + detalle) from error
+    except Exception as error:
+        raise ErrorSubtitulos(f"No pude transcribir este clip: {error}") from error
