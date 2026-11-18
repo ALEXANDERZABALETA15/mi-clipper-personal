@@ -136,25 +136,37 @@ def encontrar_momentos(senal):
     return candidatos                                    # de mejor a peor puntaje
 
 # ---------- AJUSTAR UN MOMENTO A FRASES COMPLETAS ----------
+def limites_duracion(duracion=None):
+    """Devuelve la duración mínima y máxima aceptable para el modo elegido."""
+    objetivo = int(duracion if duracion is not None else DURACION_CLIP)
+    if objetivo <= 45:                         # conserva el comportamiento de Shorts
+        return max(30, objetivo - 5), min(45, objetivo + 5)
+    tolerancia = max(12, int(round(objetivo * 0.05)))  # 5 % para segmentos largos
+    return max(60, objetivo - tolerancia), objetivo + tolerancia
+
+
+# ---------- AJUSTAR UN MOMENTO A FRASES COMPLETAS ----------
 def ajustar_a_frases(inicio, segmentos):
-    nuevo_inicio = inicio                                # por defecto, se queda donde estaba
+    nuevo_inicio = inicio
     for s in segmentos:
-        if s["inicio"] <= inicio < s["fin"]:             # caímos en medio de una frase
-            nuevo_inicio = s["inicio"]                   # empezamos al principio de esa frase
+        if s["inicio"] <= inicio < s["fin"]:
+            nuevo_inicio = s["inicio"]
             break
-        if s["inicio"] > inicio:                         # caímos en un silencio
-            if s["inicio"] - inicio <= 5:                # si la siguiente frase está cerca...
-                nuevo_inicio = s["inicio"]               # ...empezamos ahí
+        if s["inicio"] > inicio:
+            if s["inicio"] - inicio <= 5:
+                nuevo_inicio = s["inicio"]
             break
-    # El clip debe durar entre 30 y 45 segundos, cerca de la duración elegida
-    minimo = max(30, DURACION_CLIP - 5)
-    maximo = min(45, DURACION_CLIP + 5)
+
+    minimo, maximo = limites_duracion()
     finales = [s["fin"] for s in segmentos
                if nuevo_inicio + minimo <= s["fin"] <= nuevo_inicio + maximo]
     if finales:
         fin = min(finales, key=lambda f: abs(f - (nuevo_inicio + DURACION_CLIP)))
     else:
-        fin = nuevo_inicio + DURACION_CLIP               # si no hay frases, corta normal
+        fin = nuevo_inicio + DURACION_CLIP
+
+    if segmentos:
+        fin = min(fin, segmentos[-1]["fin"])
     return nuevo_inicio, fin
 
 def texto_del_clip(segmentos, inicio, fin):
@@ -164,16 +176,20 @@ def texto_del_clip(segmentos, inicio, fin):
 # ---------- MODO RÁPIDO: elige por volumen y transcribe solo alrededor ----------
 def elegir_clips_rapido(senal, candidatos):
     elegidos = []
-    for inicio in candidatos:                            # del mejor momento al peor
-        desde = max(0, inicio - 15)                      # 15 s antes, para encontrar dónde empieza la frase
-        hasta = inicio + 55                              # hasta 45 s de clip + 10 s de margen
-        segmentos = transcribir_ventana(senal, desde, hasta)   # transcribe SOLO ese pedazo
+    total = len(senal) / SR
+    margen = min(60, max(15, int(DURACION_CLIP * 0.08)))
+    for inicio in candidatos:
+        desde = max(0, inicio - margen)
+        hasta = min(total, inicio + DURACION_CLIP + margen)
+        segmentos = transcribir_ventana(senal, desde, hasta)
         ini, fin = ajustar_a_frases(inicio, segmentos)
+        if fin - ini < limites_duracion()[0]:
+            continue
         if all(fin <= e["inicio"] or ini >= e["fin"] for e in elegidos):
             elegidos.append({"inicio": ini, "fin": fin, "texto": texto_del_clip(segmentos, ini, fin)})
-        if len(elegidos) == NUM_CLIPS:                   # ya tenemos todos los que pediste: paramos
+        if len(elegidos) == NUM_CLIPS:
             break
-    return sorted(elegidos, key=lambda e: e["inicio"])   # los ordena por minuto del video
+    return sorted(elegidos, key=lambda e: e["inicio"])
 
 # ---------- RESPALDO: por volumen, pero con la transcripción completa ya hecha ----------
 def elegir_clips_con_segmentos(candidatos, segmentos):
