@@ -1,23 +1,46 @@
-
 # Entornos virtuales
 .venv/
 venv/
 env/
 
-# Archivos de Python
+# Python y herramientas de desarrollo
 __pycache__/
 *.py[cod]
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# Videos y archivos generados
-salida/
-guardados/
+# Videos y archivos generados localmente
+/salida/
+/guardados/
+/outputs/
+/temp/
+/tmp/
 *.mp4
+*.mov
+*.mkv
+*.webm
 *.wav
 *.mp3
+*.part
+*.ytdl
+*.tmp
 
-# Configuraciones locales
+# Cachés locales
+.cache/
+cache/
+
+# Configuración privada
 .env
+.env.*
+!.env.example
 .streamlit/secrets.toml
+cookies.txt
+*.cookies.txt
+
+# Registros
+*.log
 
 # Sistema operativo
 .DS_Store
