@@ -46,8 +46,18 @@ with st.sidebar:
                                      ["Español", "English", "El mismo del video"])
         precision = st.radio("Precisión de la voz del video", ["Rápida (tiny)", "Equilibrada (base)"], index=1)
     formato = st.radio("Formato", ["9:16", "16:9"], horizontal=True)        # vertical u horizontal
-    duracion = st.radio("Duración objetivo (s)", [30, 40, 45], horizontal=True)
-    cantidad = st.slider("Cantidad de clips", 3, 8, 5)                      # cuántos clips generar
+    if formato == "9:16":
+        duracion_opciones = {"30 segundos": 30, "40 segundos": 40, "45 segundos": 45}
+        etiqueta_duracion = "Duración objetivo"
+        duracion = st.radio(etiqueta_duracion, list(duracion_opciones), horizontal=True, index=1)
+        duracion = duracion_opciones[duracion]
+        cantidad = st.slider("Cantidad de clips", 3, 8, 5)
+    else:
+        duracion_opciones = {"3 minutos": 180, "5 minutos": 300, "8 minutos": 480}
+        duracion = st.radio("Duración de cada segmento", list(duracion_opciones), horizontal=True, index=1)
+        duracion = duracion_opciones[duracion]
+        cantidad = st.slider("Cantidad de segmentos", 1, 5, 2)
+        st.caption("La IA buscará bloques completos de información, explicaciones e historias. Cada segmento tendrá una duración aproximada de la opción elegida.")
     calidad = st.radio("Calidad de descarga", ["Rápida (480p)", "Normal (720p)"])
     por_fila = st.slider("Clips por fila", 2, 5, 4)                         # cuántos se ven lado a lado
 
@@ -192,7 +202,17 @@ def mostrar_clip(clip):
     if clip["puntaje"] is not None:                               # si la IA lo puntuó, lo mostramos
         st.markdown(f"**Puntaje {clip['puntaje']}/100** · {clip['tipo']}")
         st.caption(clip["motivo"])
-    st.caption(f"Minuto {minuto}:{segundo:02d} · {clip['duracion']:.0f} s")
+    minutos_clip, segundos_clip = divmod(int(clip["duracion"]), 60)
+    st.caption(f"Inicio {minuto}:{segundo:02d} · Duración {minutos_clip}:{segundos_clip:02d}")
+    if clip.get("resumen"):
+        with st.expander("Resumen del segmento", expanded=True):
+            st.write(clip["resumen"])
+            puntos = clip.get("puntos_clave") or []
+            if puntos:
+                st.markdown("**Puntos clave**")
+                for punto in puntos:
+                    if str(punto).strip():
+                        st.markdown(f"- {punto}")
 
     # Lo que se ve: con voz nueva > con título > el clip original
     mostrado = clip["datos_voz"] or clip["datos_titulo"] or clip["datos"]
