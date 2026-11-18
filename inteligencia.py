@@ -90,7 +90,9 @@ def crear_prompt(transcripcion, cantidad, duracion, idioma, idioma_video):
         idioma_texto = "inglés"
     else:
         idioma_texto = f"el mismo idioma del video (código {idioma_video})"
-    return f"""Eres un editor experto en videos cortos (YouTube Shorts, Reels, TikTok).
+
+    if duracion <= 45:
+        return f"""Eres un editor experto en videos cortos (YouTube Shorts, Reels, TikTok).
 Te paso la transcripción de un video. Cada línea tiene este formato:
 número | segundos de inicio-fin | vol (volumen de la voz, de 0 a 9) | texto
 
@@ -121,6 +123,52 @@ Responde SOLO con JSON, con esta forma exacta:
 {{"clips": [{{"desde": 0, "hasta": 0, "puntaje": 0, "tipo": "", "motivo": "", "titulo": "", "gancho": ""}}]}}
 
 Transcripción:
+{transcripcion}
+"""
+
+    tolerancia = max(12, int(round(duracion * 0.05)))
+    minimo = duracion - tolerancia
+    maximo = duracion + tolerancia
+    return f"""Eres un editor senior de videos horizontales para YouTube y contenido de formato largo.
+Analiza la transcripción completa y selecciona {cantidad} segmentos independientes de aproximadamente {duracion} segundos cada uno.
+
+Cada línea tiene este formato:
+número | segundos de inicio-fin | vol (volumen de la voz, de 0 a 9) | texto
+
+OBJETIVO DE DURACIÓN:
+- Cada segmento debe durar entre {minimo} y {maximo} segundos.
+- La duración objetivo es {duracion} segundos. No devuelvas clips de 30-45 segundos.
+- Usa los números de línea para señalar el comienzo y el final de cada segmento.
+- Si el video no contiene suficientes minutos de contenido hablado para completar un segmento, no inventes información ni rellenes con partes irrelevantes.
+
+CRITERIOS EDITORIALES:
+- Elige bloques continuos que desarrollen una idea completa: contexto, explicación o historia y un cierre natural.
+- Prioriza información útil, explicaciones profundas, ejemplos, demostraciones, argumentos y relatos con principio y conclusión.
+- Conserva las frases que aportan contexto; no extraigas frases llamativas que pierdan sentido fuera de la conversación.
+- Evita saludos, intros largas, publicidad, patrocinadores, despedidas, silencios, repeticiones y divagaciones.
+- Busca variedad: no selecciones varios segmentos que expliquen exactamente lo mismo.
+- Los segmentos no pueden cruzarse entre sí.
+- El volumen es una señal secundaria. No confundas hablar fuerte con aportar más valor.
+- Mantén el orden y el sentido original de lo que dice el creador. No inventes datos ni afirmaciones.
+
+PARA CADA SEGMENTO DEVUELVE:
+- desde: número de la primera línea del segmento
+- hasta: número de la última línea del segmento
+- puntaje: de 0 a 100, según calidad, claridad y utilidad
+- tipo: tema principal (tutorial, explicación, historia, análisis, opinión, entrevista, noticia, otro)
+- motivo: por qué vale la pena conservar este bloque
+- titulo: título descriptivo y fiel al contenido, máximo 90 caracteres
+- gancho: una frase breve que invite a ver el segmento, sin exagerar
+- resumen: resumen fiel de 2 o 3 frases, basado únicamente en la transcripción seleccionada
+- puntos_clave: lista de 3 a 5 ideas, datos o pasos realmente mencionados en el segmento
+
+Escribe el título, gancho, resumen y puntos clave en {idioma_texto}.
+No inventes nombres, cifras, fechas, fuentes ni conclusiones. Si algo no queda claro en la transcripción, no lo completes por tu cuenta.
+
+Responde SOLO con JSON válido y usa esta estructura:
+{{"clips": [{{"desde": 0, "hasta": 0, "puntaje": 0, "tipo": "", "motivo": "", "titulo": "", "gancho": "", "resumen": "", "puntos_clave": ["", "", ""]}}]}}
+
+TRANSCRIPCIÓN:
 {transcripcion}
 """
 
@@ -165,20 +213,32 @@ def pedir_a_gemini(prompt, clave, modelos):
     raise ErrorIA(f"ningún modelo respondió ({ultimo}); probé: {', '.join(modelos)}")
 
 # ---------- AJUSTAR EL CLIP A 30-45 SEGUNDOS SIN PARTIR FRASES ----------
-def ajustar_rango(desde, hasta, segmentos, total):
+def _limites_duracion(duracion):
+    if duracion <= 45:
+        return 30, 45                         # mantiene exactamente el rango anterior de Shorts
+    tolerancia = max(12, int(round(duracion * 0.05)))
+    return max(60, duracion - tolerancia), duracion + tolerancia
+
+
+# ---------- AJUSTAR EL SEGMENTO A LA DURACIÓN ELEGIDA SIN PARTIR FRASES ----------
+def ajustar_rango(desde, hasta, segmentos, total, duracion_objetivo=40):
     n = len(segmentos)
+    minimo, maximo = _limites_duracion(duracion_objetivo)
     inicio = segmentos[desde]["inicio"]
-    while segmentos[hasta]["fin"] - inicio < 30 and hasta < n - 1:    # muy corto: suma frases
+
+    while segmentos[hasta]["fin"] - inicio < minimo and hasta < n - 1:
         hasta += 1
-    while segmentos[hasta]["fin"] - inicio > 45 and hasta > desde:    # muy largo: quita frases
+    while segmentos[hasta]["fin"] - inicio > maximo and hasta > desde:
         hasta -= 1
+
     fin = segmentos[hasta]["fin"]
-    if fin - inicio > 45:                                # una sola frase larguísima: corta en 45
-        fin = inicio + 45
-    if fin - inicio < 30:                                # si aun así quedó corto: llega a 30
-        fin = inicio + 30
-    inicio = max(0, inicio - 0.4)                        # un respiro antes de la primera palabra
-    fin = min(total, fin + 0.4)                          # y otro después de la última
+    if fin - inicio > maximo:                  # una sola frase excepcionalmente larga
+        fin = inicio + maximo
+    if fin - inicio < minimo and total - inicio >= minimo:
+        fin = min(total, inicio + duracion_objetivo)
+
+    inicio = max(0, inicio - 0.4)
+    fin = min(total, fin + 0.4)
     return inicio, fin, hasta
 
 def _puntaje(p):
@@ -210,7 +270,10 @@ def elegir_clips_con_ia(senal, sr, segmentos, clave, cantidad, duracion, idioma,
             hasta = max(desde, min(int(p["hasta"]), n - 1))
         except (KeyError, ValueError, TypeError):
             continue                                     # propuesta mal formada: la saltamos
-        inicio, fin, hasta = ajustar_rango(desde, hasta, segmentos, total)
+        inicio, fin, hasta = ajustar_rango(desde, hasta, segmentos, total, duracion)
+        minimo, _ = _limites_duracion(duracion)
+        if fin - inicio < minimo:
+            continue
         if any(not (fin <= e["inicio"] or inicio >= e["fin"]) for e in elegidos):
             continue                                     # se cruza con otro clip: la saltamos
         elegidos.append({
@@ -221,7 +284,9 @@ def elegir_clips_con_ia(senal, sr, segmentos, clave, cantidad, duracion, idioma,
             "tipo": str(p.get("tipo", "")).strip(),
             "motivo": str(p.get("motivo", "")).strip(),
             "titulo": str(p.get("titulo", "")).strip()[:70],
-            "gancho": str(p.get("gancho", "")).strip()[:70],
+            "gancho": str(p.get("gancho", "")).strip()[:90],
+            "resumen": str(p.get("resumen", "")).strip()[:1200],
+            "puntos_clave": (p.get("puntos_clave", []) if isinstance(p.get("puntos_clave", []), list) else [str(p.get("puntos_clave", "")).strip()])[:5],
         })
         if len(elegidos) == cantidad:
             break
