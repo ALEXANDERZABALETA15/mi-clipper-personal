@@ -215,7 +215,7 @@ def pedir_a_gemini(prompt, clave, modelos):
 # ---------- AJUSTAR EL CLIP A 30-45 SEGUNDOS SIN PARTIR FRASES ----------
 def _limites_duracion(duracion):
     if duracion <= 45:
-        return max(30, duracion - 5), min(45, duracion + 5)
+        return 30, 45                         # mantiene exactamente el rango anterior de Shorts
     tolerancia = max(12, int(round(duracion * 0.05)))
     return max(60, duracion - tolerancia), duracion + tolerancia
 
